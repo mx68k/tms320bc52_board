@@ -1,5 +1,5 @@
 ;
-; File: DSK52D16.ASM -> Communications kernel program for 320C52 /  8. May. 2023
+; File: DSK52D16.ASM -> Communications kernel program for 320C52 /  9. May. 2023
 ;
 ; Requires coff assembler version 6.40 to assemble!
 ;
