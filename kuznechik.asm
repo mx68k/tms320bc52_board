@@ -54,47 +54,47 @@ WAIT
 		call    pulse	
 ;==========================================================================;		
 		call    nota_f 	
-        call    delay			
+                call    delay			
 		call    pause		
 		
 		call    nota_c 	
-        call    delay
+                call    delay
 		call     		
 			
 		call    nota_f 	
-        call    delay				
+                call    delay				
 		call    pause		
 			
 		call    nota_c 	  
-        call    delay					
+                call    delay					
 		call    pause		
 		
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 			
 		call    nota_e 	
-        call    delay				
+                call    delay				
 		call    pause		
 			
 		call    nota_e 	  
-        call    delay				
+                call    delay				
 		call    pause_1	
 ;==========================================================================;			
 		call    nota_e 	
-        call    delay
+                call    delay
 		call    pause		
 				
 		call    nota_c 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_e 		   
-        call    delay					
+                call    delay					
 		call    pause		
 			
 		call    nota_c 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_e 	
@@ -110,19 +110,19 @@ WAIT
 		call    pause_1			
 ;==========================================================================;
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_c 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_f 		   
-        call    delay					
+                call    delay					
 		call    pause		
 			
 		call    nota_c 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_f 	
@@ -138,19 +138,19 @@ WAIT
 		call    pause_1	
 ;==========================================================================;
 		call    nota_e 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_c 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_e 		   
-        call    delay					
+                call    delay					
 		call    pause		
 			
 		call    nota_c 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_e 	
@@ -164,19 +164,19 @@ WAIT
 ;==========================================================================;
 ;==========================================================================;
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_g 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_g 		   
-        call    delay_1					
+                call    delay_1					
 		call    pause_2		
 			
 		call    nota_g 	
-        call    delay_1		
+                call    delay_1		
 		call    pause_2		
 				
 		call    nota_g 	
@@ -204,19 +204,19 @@ WAIT
 		call    pause		
 ;==========================================================================;
 		call    nota_gd 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_gd	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_g 		   
-        call    delay					
+                call    delay					
 		call    pause		
 			
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_e 	
@@ -232,19 +232,19 @@ WAIT
 		call    pause_1	
 ;==========================================================================;
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_g 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_g 		   
-        call    delay_1					
+                call    delay_1					
 		call    pause_2		
 			
 		call    nota_g 	
-        call    delay_1		
+                call    delay_1		
 		call    pause_2		
 				
 		call    nota_g 	
@@ -272,19 +272,19 @@ WAIT
 		call    pause	
 ;==========================================================================;
 		call    nota_gd 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_gd 	
-        call    delay				
+                call    delay				
 		call    pause		
 				
 		call    nota_g 		   
-        call    delay					
+                call    delay					
 		call    pause		
 			
 		call    nota_f 	
-        call    delay		
+                call    delay		
 		call    pause		
 				
 		call    nota_e 	
@@ -295,7 +295,7 @@ WAIT
 		call    delay				
 		call    pause_1			
 ;==========================================================================;
-        b       WAIT           ; Branch to WAIT
+                b       WAIT           ; Branch to WAIT
 
 pulse   setc    xf
 		call    delay
@@ -307,13 +307,13 @@ delay	rpt     0ffffh         ;
 		nop                    ; No operation
 		banz    delay,ar5      ; 
 		lar     ar5,time0      ; 
-        ret
+                ret
 		
 delay_1	rpt     0ffffh         ; 
 		nop                    ; No operation
 		banz    delay_1,ar6    ; 
 		lar     ar6,time1      ; 
-        ret
+                ret
 
 timer_on
 		splk    #2Fh,TCR       ; reload and start timer
@@ -328,21 +328,21 @@ pause	splk    14,PRD         ; Load period counter
 		nop                    ; No operation
 		banz    pause,ar3      ; 
 		lar     ar3,time_p     ; 
-        ret
+                ret
 		
 pause_1	splk    14,PRD         ; Load period counter
 		rpt     0ffffh         ; 
 		nop                    ; No operation
 		banz    pause_1,ar4    ; 
 		lar     ar4,time_p1    ;
-        ret		
+                ret		
 		
 pause_2	splk    14,PRD         ; Load period counter
 		rpt     0ffffh         ; 
 		nop                    ; No operation
 		banz    pause_2,ar7    ; 
 		lar     ar7,time_p2    ; 
-        ret				
+                ret				
 				
 nota_c
 		splk    2388,PRD       ; do 261.63 Hz Load period counter
