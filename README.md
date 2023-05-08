@@ -13,7 +13,7 @@ TMS320BC52 board
 
 TMS320BC52PJ 100-Pin QFP
 
-![TMS320BC52PJ 100-Pin QFP](/b_2.jpg)
+![TMS320BC52PJ 100-Pin QFP](/TMS320BC52PJ.png)
 
 
 ## Serial loader
