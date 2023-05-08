@@ -6,7 +6,7 @@ def GetBin(src_name,dst_file):
     print("\n")
     print("DSK file : "+src_name)
     print("\n")
-    print("HEX data from DSK file will be save to : "+dst_file)
+    print("HEX data from DSK file will be saved to : "+dst_file)
     print("\n")
 
     src = open(src_name,'r')
