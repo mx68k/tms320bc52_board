@@ -1,0 +1,680 @@
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+                                                                     PAGE    1
+
+       1            ;
+       2            ; File: DSK52D16.ASM -> Communications kernel program for 320C52 /  9. May. 2023
+       3            ;
+       4            ; Requires coff assembler version 6.40 to assemble!
+       5            ;
+       6      001b  ESC      .set     01bh        ; escape
+       7                     .width   100
+       8                     .length   55
+      10                     .version 50
+      11                     .mmregs
+      12      0001  VERSION  .set 0001h    ; -> .01 version
+      13            
+      14                     .def tmp1,PREGH,PREGL,ST1,BITLEN,BITLEN2,ST0
+      15                     .def startadd,scratch,TREG,STACK,AUXREG,ACCUH
+      16                     .def ACCUL,length,STATUS,INTER,len,TIMER
+      17                     .def main,start,execmd,lddm,ldpm,ldld,ldlp,exec
+      18                     .def getdata,special,address,xmtwrd
+      19                     .def trapx,ACCBL,ACCBH
+      20            ;
+      21            ;        .bss section: be careful with some predefined addresses !!!!!
+      22            ;
+      23 0000                .bss ACCUL,1         ; add=60h
+      24 0001                .bss ACCUH,1         ; add=61h
+      25 0002                .bss ACCBL,1         ; add=62h
+      26 0003                .bss ACCBH,1         ; add=63h
+      27 0004                .bss PREGL,1         ; add=64h
+      28 0005                .bss PREGH,1         ; add=65h
+      29 0006                .bss ST0,1           ; add=66h
+      30 0007                .bss ST1,1           ; add=67h
+      31 0008                .bss TREG,1          ; add=68h
+      32 0009                .bss STACK,8         ; add=69h
+      33 0011                .bss AUXREG,3        ; add=71h
+      34 0014                .bss TIMER,1         ; add=74h
+      35 0015                .bss KPDWSR,1        ; add=75h
+      36 0016                .bss KCWSR,1         ; add=76h
+      37 0017                .bss KBRCR,1         ; add=77h
+      38 0018                .bss BITLEN2,1       ; add=78h -\
+      39 0019                .bss BITLEN,1        ; add=79h   \  -> used for Baudrate
+      40 001a                .bss scratch,1       ; add=7ah    \
+      41 001b                .bss tmp1,1          ; add=7bh     \ reserved for debugger kernel
+      42 001c                .bss startadd,1      ; add=7ch     /
+      43 001d                .bss length,1        ; add=7dh    /
+      44 001e                .bss STATUS,1        ; add=7eh   /
+      45 001f                .bss INTER,1         ; add=7fh -/
+      46            
+      47            ;----------------------------------------------------------------------
+      48            ; GETCMD: receive 'get' command -> returns 'command' in ar0 and arp=ar0
+      49            ;----------------------------------------------------------------------
+      50            GETCMD  .macro
+      51                     call  reads          ; receive a byte --> command
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    2
+
+      52                     sacl  scratch        ; save it for retransmit
+      53                     call  xmtbyte,ar5    ; send back program end address,returns arp=6
+      54                     lar   ar5,scratch    ; return cmd in ar6
+      55                     .endm
+      56            ;----------------------------------------------------------------------
+      57            ; DPM: Display Program Memory: transmit data block from C26 to HOST
+      58            ;----------------------------------------------------------------------
+      59            DPM      .macro
+      60                     call address         ; returns ar6=startadd,ar7=length,arp->ar6
+      61            loop?    lacc startadd        ; start add
+      62                     tblr tmp1            ; get 'n.' word from pgm to data
+      63                     add  #1              ; increment pointer: accu++
+      64                     sacl startadd        ; save pointer (accu)
+      65                     lacc tmp1            ; prepare for transmit
+      66                     call xmtwrd          ; transmit value in ACCU to PC
+      67                     mar  *,ar7           ; arp=ar7
+      68                     banz loop?,*-        ; repeat for all words
+      69                     ret
+      70                     .endm
+      71            ;----------------------------------------------------------------------
+      72            ; DDM: Display (dump) Data Memory: transfer several words from DSP to PC
+      73            ;----------------------------------------------------------------------
+      74            DDM      .macro
+      75                     call address         ; returns ar6=startadd,ar7=length,arp->ar6
+      76                     mar  *,AR6
+      77            loop?    lacc *+
+      78                     call xmtwrd          ; transmit value in ACCU to PC
+      79                     mar  *,ar7
+      80                     banz loop?,*-,ar6
+      81                     ret
+      82                     .endm
+      83            ;----------------------------------------------------------------------
+      84            ; DLD: download data memory (from PC to 320C26)
+      85            ;----------------------------------------------------------------------
+      86            DLD      .macro
+      87                     call address         ; returns ar6=startadd,ar7=length,arp->ar6
+      88            loop?    call getdata
+      89                     mar  *,ar6
+      90                     sacl *+,ar7
+      91                     banz loop?,*-
+      92                     ret
+      93                     .endm
+      94            ;----------------------------------------------------------------------
+      95            ; DLP: download program memory (from PC to 320C26)
+      96            ;----------------------------------------------------------------------
+      97            DLP      .macro
+      98                     call address         ; returns ar6=startadd,ar7=length,arp->ar6
+      99            loop?    call getdata         ; received word is in 'tmp1'
+     100                     lacc startadd
+     101                     tblw tmp1
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    3
+
+     102                     add  #1              ; akku++
+     103                     sacl startadd
+     104                     mar  *,ar7
+     105                     banz loop?,*-
+     106                     ret
+     107                     .endm
+     108            ;----------------------------------------------------------------------
+     109            ; DMPREG: dump register: context save of all registers to internal RAM B2
+     110            ;----------------------------------------------------------------------
+     111            DMPREG   .macro
+     112                      sst    #0,ST0        ; save status register 0
+     113                      dint                 ; avoid double interrupts!!!!
+     114                      ldp    #ST0          ; load data page pointer to page 0
+     115            trapx:    sacl   ACCUL         ; save accu low
+     116                      sst    #1,ST1        ; save status register 1
+     117                      sach   ACCUH         ; save accu high
+     118                      lacc   tim           ; load actual content of timer register
+     119                      sacl   TIMER         ; copy timer to B2
+     120                      lacb                 ; ACCB -> ACC
+     121                      sacl   ACCBL         ; save accb low
+     122                      sach   ACCBH         ; save accb hugh
+     123                      sph    PREGH         ; save product register high
+     124                      spl    PREGL         ; save product register low
+     125                      mpy    #1            ; treg -> preg
+     126                      spl    TREG          ; save T-Register
+     127                      sar    ar5,AUXREG    ; save ar5
+     128                      sar    ar6,AUXREG+1  ; save ar6
+     129                      sar    ar7,AUXREG+2  ; save ar7
+     130                      larp   ar5           ; arp=ar5
+     131                      lark   ar5,#STACK    ; ar5-> stack / force 8 bit constant
+     132                      rpt    #7            ; save 8 stack register
+     133                      popd   *+            ; stack -> memory
+     134            ;
+     135            ; the following is necessary to rebuilt the ARP for the display!
+     136            ; while keeping all the other bits unchanged (especially Data page pointer)!
+     137            ;
+     138                      ldp    #ST0          ; go back to page 0 !!!! added: 14.7.92
+     139                      lst    #1,ST1
+     140                      lst    #0,ST0
+     141            ;         ldp    ST0           ; added to correct DP problem: 14.7.92
+     142                      sst    #0,ST0
+     143                      ldp    #ST0          ; added to correct DP problem: 14.7.92
+     144                      .endm
+     145            ;----------------------------------------------------------------------
+     146            ;  EXECUTE:   execute a program from address !
+     147            ;----------------------------------------------------------------------
+     148            EXECUTE  .macro
+     149                     call   getdata       ; received word is in accu and 'tmp1'-->startadd
+     150                     sacl   STACK         ; startadd= address for restart of user program
+     151                     bcnd   $+4,bio       ; wait for start code
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    4
+
+     152                     b      $-2
+     153                     bcnd   $,bio
+     154            ; the following lines execute a dummy interrupt to reset IF(int2) !!!!!
+     155                     lack   1             ; flag into 'scratch' for 'halt'
+     156                     bldd   #66h,tmp1     ; save B2(ST0) to temp
+     157                     eint                 ; execute the interrupt service routine
+     158                     sacl   scratch       ; set a flag for executing dummy interrupts
+     159                     bldd   tmp1,#66h     ; restore ST0 to B2(ST0)
+     160            ; IFR(int2) is turned off!
+     161                     lacl   #0            ; reset flag
+     162                     sacl   scratch       ; in scratch!
+     163            ; finished dummy interrupt!!!!!!!
+     164                     lar    ar5,#STACK+7  ; force 8 bit constant
+     165                     rpt    #7            ; reload stack (6 values)
+     166                     pshd   *-
+     167                     lar    ar5,AUXREG
+     168                     lar    ar6,AUXREG+1
+     169                     lar    ar7,AUXREG+2
+     170                     lt     PREGL
+     171                     mpy    #1
+     172                     lph    PREGH
+     173                     lt     TREG
+     174                     lacc   TIMER
+     175                     sacl   tim
+     176                     lacc   ACCBH,16
+     177                     adds   ACCBL
+     178                     sacb
+     179                     lacc   ACCUH,16
+     180                     adds   ACCUL
+     181                     lst    #1,ST1
+     182                     lst    #0,ST0
+     183                     eint
+     184                     ret
+     185                     .endm
+     186            ;----------------------------------------------------------------------
+     187            ;  TRANSMIT: transmit word
+     188            ;----------------------------------------------------------------------
+     189            TRANSMIT .macro
+     190            xmtwrd   sacl scratch
+     191                     rpt  #7
+     192                     sfr
+     193                     call _xmtbyte         ; send highbyte
+     194                     lacc scratch         ;
+     195            _xmtbyte bcnd $+4,bio         ; expect a sync (0) signal from PC
+     196                     b    $-2
+     197            ; xmtbyte follows now         ; send lowbyte and return to calling pgm
+     198            ;
+     199            ;  'xmtbyte' requires ARP->AR0 and sets ACCU='mask for byte'
+     200            ;  send startbit (0) +  databyte + stopbits (2)
+     201            ;
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    5
+
+     202            xmtbyte: clrc c               ; startbit=0
+     203                     lar  ar5,#8          ; counter: 1 startbit+ 8 databits (+ 2 stopbits)
+     204            nextbit1 bcnd snd0,nc         ; if c=1 send 1 else send 0
+     205            snd1     setc xf              ; send one
+     206                     b    snd
+     207            snd0     clrc xf
+     208            snd      rpt  BITLEN          ; send one bit
+     209                     mar  *,ar5
+     210                     ror                  ; lsb(accu) -> carrybit
+     211                     banz nextbit1,*-     ; repeat for entire word (10 bits)
+     212            ;    
+     213                     setc xf
+     214                     rpt  BITLEN
+     215                     nop
+     216                     rpt  BITLEN
+     217                     nop
+     218                     ret
+     219                     .endm
+     220            ;----------------------------------------------------------------------
+     221            ; GETADD:   receive startaddress and length
+     222            ;           return: ar6=startadd / ar7=len / arp= ar6
+     223            ;----------------------------------------------------------------------
+     224            GETADD   .macro
+     225            address  call   getdata       ; receive start address and send it back!!!!
+     226                     sacl   startadd
+     227                     lar    ar6,startadd  ; len   add
+     228                     call   getdata       ; receive length and send it back!!!!
+     229                     sacl   length        ; length includes the zero!!!
+     230                     lar    ar7,length    ; len   add
+     231                     larp   ar6
+     232                     ret
+     233                     .endm
+     234            ;----------------------------------------------------------------------
+     235            ; GETDATA: receive a word and send it back
+     236            ;          ACCU and tmp1 returns received word
+     237            ;          uses 'tmp1'
+     238            ;----------------------------------------------------------------------
+     239            GETDATA  .macro
+     240            getdata  call   reads         ; receive low byte of word
+     241                     sacl   tmp1          ; save low byte
+     242                     call   xmtbyte       ; send it back
+     243                     call   reads         ; receive high byte of word
+     244                     add    tmp1,8
+     245                     sacl   tmp1
+     246                     call   xmtbyte       ; send it back
+     247                     lacc   tmp1
+     248                     ret
+     249                     .endm
+     250            ;----------------------------------------------------------------------
+     251            ; Exchange program memory address
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    6
+
+     252            ; 1. receive pgm address
+     253            ; 2. read    content address and send content to PC
+     254            ; 3. receive new content and store it
+     255            ;----------------------------------------------------------------------
+     256            XCH_PGM  .macro
+     257                     call address         ; returns ar6=startadd,ar7=length,arp->ar6
+     258                     lacc startadd        ; startadd==address
+     259                     tblr startadd        ; startadd:=original content of address
+     260                     tblw length          ; length== new content
+     261                     lacc startadd
+     262                     b    xmtwrd          ; transmit value in ACCU to PC
+     263                     .endm
+     264            ;----------------------------------------------------------------------
+     265            ; the following macro is a software halt (like a NMI) to halt (stop) the
+     266            ; 320C26 while in runmode
+     267            ;----------------------------------------------------------------------
+     268            HALT     .macro
+     269            halt:    ldp    #ST0          ; load dta page pointer to 0
+     270                     bit    scratch,15    ; TC=1 => dummy interrupt
+     271                     bcnd   trapx,ntc  ; if bit==0 it is a HALT => go to trapx routine
+     272                     reti                 ; return from dummy interrupt
+     273                     .endm
+     274            ;----------------------------------------------------------------------
+     275            ; READS: read serial mode
+     276            ;----------------------------------------------------------------------
+     277            READS     .macro
+     278            reads:    rpt    BITLEN
+     279                      nop
+     280            wait      Bcndd  STOK,bio     ;wait for start bit
+     281                      lar    AR5,#7
+     282                      lacl   #0
+     283                      B      wait         ;
+     284            STOK      rpt    BITLEN2      ;BITLEN is scaled and
+     285                      nop
+     286                      mar    *,AR5        ;number of bits - 1
+     287            WTBIT     sfr
+     288                      rpt    BITLEN       ;decremented by 8/3 for
+     289                      nop                 ;BITLEN/2 wait
+     290                      bcnd   ZEROBT,bio
+     291                      add    #80h
+     292            ZEROBT    BANZ   WTBIT,*-     ;last bit ?
+     293                      RET                 ;ACC = read value
+     294                      .endm
+     295            ;======================================================================
+     296            ;
+     297            ;  BEGIN OF MAIN PROGRAM
+     298            ;
+     299            ;======================================================================
+     300 0000                .text
+     301 0000 7980           b       start        ;00; RESET
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    7
+
+         0001 0043' 
+     302 0002 be3a  int1     rete                 ;02; vectors for interrupt int1
+     303 0003 8b00           nop
+     304 0004 7980  int2     b       halt         ;04; vectors for interrupt int2
+         0005 0134' 
+     305 0006 be3a  int3     rete                 ;06; vectors for interrupt int3
+     306 0007 8b00           nop
+     307 0008 be3a  tint     rete                 ;08; timer interrupt vector - TINT
+     308 0009 8b00           nop
+     309 000a be3a  rint     rete                 ;0A; Serial port receive interrupt
+     310 000b 8b00           nop
+     311 000c be3a  xint     rete                 ;0C; Serial port transmit interrupt
+     312 000d 8b00           nop
+     313 000e                .space  4 * 16       ;0E; vectors for TDM port TRNT, TXNT
+     314 0012 7980  int4     b       start        ;12; vectors for interrupt int4
+         0013 0043' 
+     315 0014                .space  14 * 16      ;14; Reserved space.  Should not be used.
+     316 0022 7980           b       trap         ;22; trapx instruction vector
+         0023 0116' 
+     317 0024                .space  2 * 16       ;24; Non Maskable Interrupt vector
+     318 0026                .space  2 * 16       ;26; Reserved space.  Should not be used.
+     319 0028                .space 24 * 16       ;28; Software Interrupt.
+     320            
+     321 0040 0133'          .word   special
+     322 0041 0139'          .word   len,VERSION
+         0042 0001  
+     323 0043 bc00  start:   ldp    #0
+     324 0044 be46           clrc   SXM
+     325                     ;opl    #0834h,PMST    ; set 9K on-chip RAM both prog & data memory
+     326 0045 bf80           lacc   #0             ; set Wait State Control Register
+         0046 0000  
+     327 0047 902a           sacl   CWSR           ; for 0 waits in prog & data memory
+     328 0048 9028           sacl   PDWSR
+     329 0049 be45                   setc   CNF            ; The on-chip DARAM block 0 is mapped int
+     330 004a b500           lar    AR5,#0         ; using AR5 to count bit langth
+     331 004b 8b8d           mar    *,AR5
+     332            ;        bcnd   $,bio          ; prevent to hit the bio at the middle.
+     333 004c e000  autob0   bcnd   stbit,bio      ; wait for start bit
+         004d 0050' 
+     334 004e 7980           b      autob0
+         004f 004c' 
+     335 0050 f000  stbit    bcndd  stbit,bio      ; send in 0x80 will keep 8 bit length low
+         0051 0050' 
+     336 0052 8bad           mar    *+,AR5         ;
+     337 0053 8bad           mar    *+,AR5         ;
+     338            ;         lacc   AR5,12         ;
+     339 0054 1c15                   lacc   AR5,12         ;
+     340 0055 9818-          sach   BITLEN2        ; save AR5/16 in BITLEN2
+     341            ;         lacc   AR5,14
+     342 0056 1e15                   lacc   AR5,14
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    8
+
+     343            ;        sub    #10h,15
+     344 0057 9819-          sach   BITLEN         ; save AR5/8 in BITLEN
+     345            
+     346 0058 bf80  XMT_ESC  lacc   #ESC           ; send ESC to PC
+         0059 001b  
+     347 005a 7a80           call   xmtbyte
+         005b 00ef' 
+     348            
+     349 005c 7a80  main     call   execmd         ; 'main control loop      
+         005d 0060' 
+     350 005e 7980           b      main           ; execmd returns here after command execution
+         005f 005c' 
+     351            ;
+     352            ; execute commands
+     353            ;
+     354            
+     355 0060       execmd   GETCMD               ; macro returns command in ar0 and arp=ar0
+1        0060 7a80           call  reads          ; receive a byte --> command
+         0061 0102' 
+1        0062 901a-          sacl  scratch        ; save it for retransmit
+1        0063 7a8d           call  xmtbyte,ar5    ; send back program end address,returns arp=6
+         0064 00ef' 
+1        0065 051a-          lar   ar5,scratch    ; return cmd in ar6
+     356 0066 7b90  lddm     banz   ldpm,*-       ; dump data memory
+         0067 0072' 
+     357 0068                DDM                  ; macro 'dump data memory'    DSP -> PC
+1        0068 7a80           call address         ; returns ar6=startadd,ar7=length,arp->ar6
+         0069 00db' 
+1        006a 8b8e           mar  *,AR6
+1        006b 10a0  loop?    lacc *+
+1        006c 7a80           call xmtwrd          ; transmit value in ACCU to PC
+         006d 00e5' 
+1        006e 8b8f           mar  *,ar7
+1        006f 7b9e           banz loop?,*-,ar6
+         0070 006b' 
+1        0071 ef00           ret
+     358 0072 7b90  ldpm     banz   ldld,*-       ; dump program memory
+         0073 0081' 
+     359 0074                DPM                  ; macro 'dump program memory' DSP -> PC
+1        0074 7a80           call address         ; returns ar6=startadd,ar7=length,arp->ar6
+         0075 00db' 
+1        0076 101c- loop?    lacc startadd        ; start add
+1        0077 a61b-          tblr tmp1            ; get 'n.' word from pgm to data
+1        0078 b801           add  #1              ; increment pointer: accu++
+1        0079 901c-          sacl startadd        ; save pointer (accu)
+1        007a 101b-          lacc tmp1            ; prepare for transmit
+1        007b 7a80           call xmtwrd          ; transmit value in ACCU to PC
+         007c 00e5' 
+1        007d 8b8f           mar  *,ar7           ; arp=ar7
+1        007e 7b90           banz loop?,*-        ; repeat for all words
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE    9
+
+         007f 0076' 
+1        0080 ef00           ret
+     360 0081 7b90  ldld     banz   ldlp,*-       ; load data memory to c26
+         0082 008c' 
+     361 0083                DLD                  ; macro 'download data'       PC  -> DSP
+1        0083 7a80           call address         ; returns ar6=startadd,ar7=length,arp->ar6
+         0084 00db' 
+1        0085 7a80  loop?    call getdata
+         0086 00ce' 
+1        0087 8b8e           mar  *,ar6
+1        0088 90af           sacl *+,ar7
+1        0089 7b90           banz loop?,*-
+         008a 0085' 
+1        008b ef00           ret
+     362 008c 7b90  ldlp     banz   xpgm,*-       ; load program memory to c26
+         008d 009a' 
+     363 008e                DLP                  ; macro 'download program'    PC  -> DSP
+1        008e 7a80           call address         ; returns ar6=startadd,ar7=length,arp->ar6
+         008f 00db' 
+1        0090 7a80  loop?    call getdata         ; received word is in 'tmp1'
+         0091 00ce' 
+1        0092 101c-          lacc startadd
+1        0093 a71b-          tblw tmp1
+1        0094 b801           add  #1              ; akku++
+1        0095 901c-          sacl startadd
+1        0096 8b8f           mar  *,ar7
+1        0097 7b90           banz loop?,*-
+         0098 0090' 
+1        0099 ef00           ret
+     364 009a 7b90  xpgm     banz   exec,*-       ; load pgm  word to PC
+         009b 00a4' 
+     365 009c                XCH_PGM              ; macro 'exchange pgm memory word'
+1        009c 7a80           call address         ; returns ar6=startadd,ar7=length,arp->ar6
+         009d 00db' 
+1        009e 101c-          lacc startadd        ; startadd==address
+1        009f a61c-          tblr startadd        ; startadd:=original content of address
+1        00a0 a71d-          tblw length          ; length== new content
+1        00a1 101c-          lacc startadd
+1        00a2 7980           b    xmtwrd          ; transmit value in ACCU to PC
+         00a3 00e5' 
+     366 00a4 7b90  exec     banz   special,*-    ; execute to breakpoint or single step
+         00a5 0133' 
+     367 00a6                EXECUTE              ; macro 'execute program'
+1        00a6 7a80           call   getdata       ; received word is in accu and 'tmp1'-->startadd
+         00a7 00ce' 
+1        00a8 9009-          sacl   STACK         ; startadd= address for restart of user program
+1        00a9 e000           bcnd   $+4,bio       ; wait for start code
+         00aa 00ad' 
+1        00ab 7980           b      $-2
+         00ac 00a9' 
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE   10
+
+1        00ad e000           bcnd   $,bio
+         00ae 00ad' 
+1                   ; the following lines execute a dummy interrupt to reset IF(int2) !!!!!
+1        00af b901           lack   1             ; flag into 'scratch' for 'halt'
+1        00b0 a81b-          bldd   #66h,tmp1     ; save B2(ST0) to temp
+         00b1 0066  
+1        00b2 be40           eint                 ; execute the interrupt service routine
+1        00b3 901a-          sacl   scratch       ; set a flag for executing dummy interrupts
+1        00b4 a91b-          bldd   tmp1,#66h     ; restore ST0 to B2(ST0)
+         00b5 0066  
+1                   ; IFR(int2) is turned off!
+1        00b6 b900           lacl   #0            ; reset flag
+1        00b7 901a-          sacl   scratch       ; in scratch!
+1                   ; finished dummy interrupt!!!!!!!
+1        00b8 bf0d           lar    ar5,#STACK+7  ; force 8 bit constant
+         00b9 0010- 
+1        00ba bb07           rpt    #7            ; reload stack (6 values)
+1        00bb 7690           pshd   *-
+1        00bc 0511-          lar    ar5,AUXREG
+1        00bd 0612-          lar    ar6,AUXREG+1
+1        00be 0713-          lar    ar7,AUXREG+2
+1        00bf 7304-          lt     PREGL
+1        00c0 c001           mpy    #1
+1        00c1 7505-          lph    PREGH
+1        00c2 7308-          lt     TREG
+1        00c3 1014-          lacc   TIMER
+1        00c4 9024           sacl   tim
+1        00c5 6a03-          lacc   ACCBH,16
+1        00c6 6202-          adds   ACCBL
+1        00c7 be1e           sacb
+1        00c8 6a01-          lacc   ACCUH,16
+1        00c9 6200-          adds   ACCUL
+1        00ca 0f07-          lst    #1,ST1
+1        00cb 0e06-          lst    #0,ST0
+1        00cc be40           eint
+1        00cd ef00           ret
+     368 00ce                GETDATA              ; macro 'get data word'
+1        00ce 7a80  getdata  call   reads         ; receive low byte of word
+         00cf 0102' 
+1        00d0 901b-          sacl   tmp1          ; save low byte
+1        00d1 7a80           call   xmtbyte       ; send it back
+         00d2 00ef' 
+1        00d3 7a80           call   reads         ; receive high byte of word
+         00d4 0102' 
+1        00d5 281b-          add    tmp1,8
+1        00d6 901b-          sacl   tmp1
+1        00d7 7a80           call   xmtbyte       ; send it back
+         00d8 00ef' 
+1        00d9 101b-          lacc   tmp1
+1        00da ef00           ret
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE   11
+
+     369 00db                GETADD               ; macro 'get 2 data words'
+1        00db 7a80  address  call   getdata       ; receive start address and send it back!!!!
+         00dc 00ce' 
+1        00dd 901c-          sacl   startadd
+1        00de 061c-          lar    ar6,startadd  ; len   add
+1        00df 7a80           call   getdata       ; receive length and send it back!!!!
+         00e0 00ce' 
+1        00e1 901d-          sacl   length        ; length includes the zero!!!
+1        00e2 071d-          lar    ar7,length    ; len   add
+1        00e3 8b8e           larp   ar6
+1        00e4 ef00           ret
+     370 00e5                TRANSMIT             ; macro 'transmit a word or a byte'
+1        00e5 901a- xmtwrd   sacl scratch
+1        00e6 bb07           rpt  #7
+1        00e7 be0a           sfr
+1        00e8 7a80           call _xmtbyte         ; send highbyte
+         00e9 00eb' 
+1        00ea 101a-          lacc scratch         ;
+1        00eb e000  _xmtbyte bcnd $+4,bio         ; expect a sync (0) signal from PC
+         00ec 00ef' 
+1        00ed 7980           b    $-2
+         00ee 00eb' 
+1                   ; xmtbyte follows now         ; send lowbyte and return to calling pgm
+1                   ;
+1                   ;  'xmtbyte' requires ARP->AR0 and sets ACCU='mask for byte'
+1                   ;  send startbit (0) +  databyte + stopbits (2)
+1                   ;
+1        00ef be4e  xmtbyte: clrc c               ; startbit=0
+1        00f0 b508           lar  ar5,#8          ; counter: 1 startbit+ 8 databits (+ 2 stopbits)
+1        00f1 e301  nextbit1 bcnd snd0,nc         ; if c=1 send 1 else send 0
+         00f2 00f6' 
+1        00f3 be4d  snd1     setc xf              ; send one
+1        00f4 7980           b    snd
+         00f5 00f7' 
+1        00f6 be4c  snd0     clrc xf
+1        00f7 0b19- snd      rpt  BITLEN          ; send one bit
+1        00f8 8b8d           mar  *,ar5
+1        00f9 be0d           ror                  ; lsb(accu) -> carrybit
+1        00fa 7b90           banz nextbit1,*-     ; repeat for entire word (10 bits)
+         00fb 00f1' 
+1                   ;    
+1        00fc be4d           setc xf
+1        00fd 0b19-          rpt  BITLEN
+1        00fe 8b00           nop
+1        00ff 0b19-          rpt  BITLEN
+1        0100 8b00           nop
+1        0101 ef00           ret
+     371 0102                READS                ; macro 'serial RS232 mode from BIO-PIN'
+1        0102 0b19- reads:    rpt    BITLEN
+1        0103 8b00            nop
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE   12
+
+1        0104 f000  wait      Bcndd  STOK,bio     ;wait for start bit
+         0105 010a' 
+1        0106 b507            lar    AR5,#7
+1        0107 b900            lacl   #0
+1        0108 7980            B      wait         ;
+         0109 0104' 
+1        010a 0b18- STOK      rpt    BITLEN2      ;BITLEN is scaled and
+1        010b 8b00            nop
+1        010c 8b8d            mar    *,AR5        ;number of bits - 1
+1        010d be0a  WTBIT     sfr
+1        010e 0b19-           rpt    BITLEN       ;decremented by 8/3 for
+1        010f 8b00            nop                 ;BITLEN/2 wait
+1        0110 e000            bcnd   ZEROBT,bio
+         0111 0113' 
+1        0112 b880            add    #80h
+1        0113 7b90  ZEROBT    BANZ   WTBIT,*-     ;last bit ?
+         0114 010d' 
+1        0115 ef00            RET                 ;ACC = read value
+     372 0116       trap     DMPREG
+1        0116 8e06-           sst    #0,ST0        ; save status register 0
+1        0117 be41            dint                 ; avoid double interrupts!!!!
+1        0118 bc00-           ldp    #ST0          ; load data page pointer to page 0
+1        0119 9000- trapx:    sacl   ACCUL         ; save accu low
+1        011a 8f07-           sst    #1,ST1        ; save status register 1
+1        011b 9801-           sach   ACCUH         ; save accu high
+1        011c 1024            lacc   tim           ; load actual content of timer register
+1        011d 9014-           sacl   TIMER         ; copy timer to B2
+1        011e be1f            lacb                 ; ACCB -> ACC
+1        011f 9002-           sacl   ACCBL         ; save accb low
+1        0120 9803-           sach   ACCBH         ; save accb hugh
+1        0121 8d05-           sph    PREGH         ; save product register high
+1        0122 8c04-           spl    PREGL         ; save product register low
+1        0123 c001            mpy    #1            ; treg -> preg
+1        0124 8c08-           spl    TREG          ; save T-Register
+1        0125 8511-           sar    ar5,AUXREG    ; save ar5
+1        0126 8612-           sar    ar6,AUXREG+1  ; save ar6
+1        0127 8713-           sar    ar7,AUXREG+2  ; save ar7
+1        0128 8b8d            larp   ar5           ; arp=ar5
+1        0129 b509-           lark   ar5,#STACK    ; ar5-> stack / force 8 bit constant
+1        012a bb07            rpt    #7            ; save 8 stack register
+1        012b 8aa0            popd   *+            ; stack -> memory
+1                   ;
+1                   ; the following is necessary to rebuilt the ARP for the display!
+1                   ; while keeping all the other bits unchanged (especially Data page pointer)!
+1                   ;
+1        012c bc00-           ldp    #ST0          ; go back to page 0 !!!! added: 14.7.92
+1        012d 0f07-           lst    #1,ST1
+1        012e 0e06-           lst    #0,ST0
+1                   ;         ldp    ST0           ; added to correct DP problem: 14.7.92
+1        012f 8e06-           sst    #0,ST0
+DSP Fixed Point COFF Assembler Version 6.40     Tue May 09 01:58:20 2023
+ Copyright (c) 1987-1992  Texas Instruments Incorporated 
+
+TMS320C52 Debugger Kernal                                            PAGE   13
+
+1        0130 bc00-           ldp    #ST0          ; added to correct DP problem: 14.7.92
+     373 0131 7980           b      XMT_ESC       ; send ESC to synchronize DSP & PC
+         0132 0058' 
+     374 0133 ef00  special  ret                  ; branch back if invalid 'code'
+     375 0134                HALT                 ; Interrupt (2) service routine
+1        0134 bc00- halt:    ldp    #ST0          ; load dta page pointer to 0
+1        0135 4f1a-          bit    scratch,15    ; TC=1 => dummy interrupt
+1        0136 e200           bcnd   trapx,ntc  ; if bit==0 it is a HALT => go to trapx routine
+         0137 0119' 
+1        0138 be38           reti                 ; return from dummy interrupt
+     376                                          ; HALT gets overwritten from some copy/fill progs
+     377      0139' len      .set    $-00000h     ; length of monitor kernal
+     378                     .end
+
+ No Errors,  No Warnings
